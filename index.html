@@ -398,14 +398,21 @@ function pushHistory(tiredProb){
 
 async function loadModel(){
   loadingText.textContent = 'กำลังโหลดโมเดล…';
-  model = await tf.loadLayersModel('model/model.json');
-  // warm up
-  const warm = tf.zeros([1, IMG_SIZE, IMG_SIZE, 3]);
-  model.predict(warm).dispose();
-  warm.dispose();
-  loadingText.textContent = 'โมเดลพร้อมใช้งาน';
-  liveDot.classList.remove('live');
-  startBtn.disabled = false;
+  try{
+    model = await tf.loadGraphModel('model/model.json');
+    // warm up
+    const warm = tf.zeros([1, IMG_SIZE, IMG_SIZE, 3]);
+    model.predict(warm).dispose();
+    warm.dispose();
+    loadingText.textContent = 'โมเดลพร้อมใช้งาน';
+    liveDot.classList.remove('live');
+    startBtn.disabled = false;
+  }catch(err){
+    console.error('โหลดโมเดลไม่สำเร็จ:', err);
+    loadingText.textContent = 'โหลดโมเดลไม่สำเร็จ: ' + err.message;
+    loadingText.style.color = 'var(--danger)';
+    startBtn.disabled = true;
+  }
 }
 
 async function startCamera(){
@@ -419,7 +426,13 @@ async function startCamera(){
     loadingText.textContent = 'กำลังตรวจจับแบบ real-time';
     loopHandle = setInterval(runPrediction, PREDICT_INTERVAL_MS);
   }catch(err){
-    loadingText.textContent = 'เปิดกล้องไม่สำเร็จ: ' + err.message;
+    console.error('เปิดกล้องไม่สำเร็จ:', err);
+    let hint = '';
+    if(err.name === 'NotAllowedError') hint = ' (คุณอาจกดปฏิเสธสิทธิ์กล้อง ลองกดอนุญาตใหม่ในไอคอนกุญแจ/กล้องที่แถบ URL)';
+    else if(err.name === 'NotFoundError') hint = ' (ไม่พบกล้องบนอุปกรณ์นี้)';
+    else if(location.protocol !== 'https:' && location.hostname !== 'localhost') hint = ' (เว็บต้องเปิดผ่าน HTTPS หรือ localhost เท่านั้น กล้องถึงจะทำงานได้)';
+    loadingText.textContent = 'เปิดกล้องไม่สำเร็จ: ' + err.message + hint;
+    loadingText.style.color = 'var(--danger)';
   }
 }
 
