@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>เครื่องวัดความตื่นตัว</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow/4.22.0/tf.min.js"></script>
+<style>
+  :root{
+    --bg:#0A0E13;
+    --panel:#111820;
+    --panel-2:#161F29;
+    --hairline:#223040;
+    --text:#E7EDF3;
+    --text-dim:#7E93A6;
+    --alert:#42D6C4;      /* awake / normal */
+    --warn:#F2A340;       /* mild fatigue */
+    --danger:#EF5B5B;     /* tired */
+    --font-display:'Space Grotesk', sans-serif;
+    --font-body:'Inter', sans-serif;
+    --font-mono:'IBM Plex Mono', monospace;
+  }
+
+  @font-face{
+    font-family:'Space Grotesk';
+    src:local('Space Grotesk');
+  }
+
+  *{box-sizing:border-box;}
+
+  html,body{
+    margin:0;
+    padding:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--font-body);
+    min-height:100vh;
+  }
+
+  body{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:32px 16px;
+  }
+
+  .rig{
+    width:100%;
+    max-width:920px;
+  }
+
+  .rig-head{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    margin-bottom:20px;
+    flex-wrap:wrap;
+    gap:8px;
+  }
+
+  .rig-head h1{
+    font-family:var(--font-display);
+    font-weight:600;
+    font-size:22px;
+    letter-spacing:0.01em;
+    margin:0;
+  }
+
+  .rig-head .eyebrow{
+    font-family:var(--font-mono);
+    font-size:11px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--text-dim);
+    display:block;
+    margin-bottom:4px;
+  }
+
+  .clock{
+    font-family:var(--font-mono);
+    font-size:12px;
+    color:var(--text-dim);
+  }
+
+  .console{
+    display:grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap:1px;
+    background:var(--hairline);
+    border:1px solid var(--hairline);
+    border-radius:14px;
+    overflow:hidden;
+  }
+
+  @media (max-width: 720px){
+    .console{ grid-template-columns: 1fr; }
+  }
+
+  .viewport{
+    background:#000;
+    position:relative;
+    aspect-ratio: 4/3;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    overflow:hidden;
+  }
+
+  .viewport video{
+    width:100%;
+    height:100%;
+    object-fit:cover;
+    transform:scaleX(-1);
+    filter:saturate(0.92) contrast(1.03);
+  }
+
+  .viewport .scan-frame{
+    position:absolute;
+    inset:0;
+    pointer-events:none;
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .viewport .corner{
+    position:absolute;
+    width:22px; height:22px;
+    border-color: var(--alert);
+    border-style:solid;
+    border-width:0;
+    opacity:0.85;
+    transition: border-color 0.4s ease;
+  }
+  .corner.tl{ top:14px; left:14px; border-top-width:2px; border-left-width:2px; }
+  .corner.tr{ top:14px; right:14px; border-top-width:2px; border-right-width:2px; }
+  .corner.bl{ bottom:14px; left:14px; border-bottom-width:2px; border-left-width:2px; }
+  .corner.br{ bottom:14px; right:14px; border-bottom-width:2px; border-right-width:2px; }
+
+  .viewport .idle-msg{
+    position:absolute;
+    color:var(--text-dim);
+    font-family:var(--font-mono);
+    font-size:13px;
+    text-align:center;
+    padding:0 24px;
+  }
+
+  .panel{
+    background:var(--panel);
+    padding:28px 26px;
+    display:flex;
+    flex-direction:column;
+    gap:22px;
+  }
+
+  .status-row{
+    display:flex;
+    align-items:center;
+    gap:18px;
+  }
+
+  .gauge{
+    flex-shrink:0;
+    width:120px;
+    height:120px;
+  }
+
+  .status-copy .eyebrow{
+    font-family:var(--font-mono);
+    font-size:10.5px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--text-dim);
+    margin-bottom:6px;
+    display:block;
+  }
+
+  .status-label{
+    font-family:var(--font-display);
+    font-size:28px;
+    font-weight:600;
+    line-height:1.1;
+    transition:color 0.4s ease;
+    color:var(--text-dim);
+  }
+
+  .status-conf{
+    font-family:var(--font-mono);
+    font-size:13px;
+    color:var(--text-dim);
+    margin-top:6px;
+  }
+
+  .divider{
+    height:1px;
+    background:var(--hairline);
+  }
+
+  .btnrow{
+    display:flex;
+    gap:10px;
+  }
+
+  button{
+    font-family:var(--font-body);
+    font-size:13.5px;
+    font-weight:600;
+    padding:11px 18px;
+    border-radius:8px;
+    border:1px solid var(--hairline);
+    background:var(--panel-2);
+    color:var(--text);
+    cursor:pointer;
+    transition: all 0.15s ease;
+    flex:1;
+  }
+  button:hover{ border-color:var(--alert); color:var(--alert); }
+  button:disabled{ opacity:0.35; cursor:not-allowed; }
+  button:disabled:hover{ border-color:var(--hairline); color:var(--text); }
+
+  button.stop:hover{ border-color:var(--danger); color:var(--danger); }
+
+  .history{
+    display:flex;
+    align-items:flex-end;
+    gap:3px;
+    height:44px;
+  }
+
+  .history .tick{
+    flex:1;
+    border-radius:2px 2px 0 0;
+    background:var(--hairline);
+    min-height:3px;
+    transition: height 0.3s ease, background 0.3s ease;
+  }
+
+  .foot-note{
+    font-family:var(--font-mono);
+    font-size:11px;
+    color:var(--text-dim);
+    line-height:1.6;
+  }
+
+  .loading-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-family:var(--font-mono);
+    font-size:12px;
+    color:var(--text-dim);
+  }
+
+  .dot{
+    width:6px; height:6px;
+    border-radius:50%;
+    background:var(--text-dim);
+  }
+  .dot.live{ background:var(--alert); box-shadow:0 0 8px var(--alert); animation:pulse 1.6s infinite ease-in-out; }
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:0.35;} }
+
+  @media (prefers-reduced-motion: reduce){
+    .dot.live{ animation:none; }
+    * { transition:none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="rig">
+  <div class="rig-head">
+    <div>
+      <span class="eyebrow">Fatigue Monitor · Client-side inference</span>
+      <h1>เครื่องวัดความตื่นตัว</h1>
+    </div>
+    <div class="clock" id="clock">--:--:--</div>
+  </div>
+
+  <div class="console">
+
+    <div class="viewport" id="viewport">
+      <video id="video" autoplay playsinline muted></video>
+      <div class="scan-frame">
+        <div class="corner tl"></div>
+        <div class="corner tr"></div>
+        <div class="corner bl"></div>
+        <div class="corner br"></div>
+      </div>
+      <div class="idle-msg" id="idleMsg">กดปุ่ม "เริ่มกล้อง" เพื่อเริ่มตรวจจับ</div>
+    </div>
+
+    <div class="panel">
+
+      <div class="loading-row" id="loadingRow">
+        <span class="dot" id="liveDot"></span>
+        <span id="loadingText">กำลังโหลดโมเดล…</span>
+      </div>
+
+      <div class="status-row">
+        <svg class="gauge" viewBox="0 0 120 120" id="gaugeSvg">
+          <circle cx="60" cy="60" r="50" fill="none" stroke="#1C2733" stroke-width="10"/>
+          <circle cx="60" cy="60" r="50" fill="none" stroke="var(--alert)" stroke-width="10"
+                  stroke-linecap="round" id="gaugeArc"
+                  stroke-dasharray="314.159" stroke-dashoffset="314.159"
+                  transform="rotate(-90 60 60)"/>
+          <text x="60" y="66" text-anchor="middle" font-family="IBM Plex Mono, monospace"
+                font-size="20" fill="#E7EDF3" id="gaugeText">--</text>
+        </svg>
+        <div class="status-copy">
+          <span class="eyebrow">สถานะปัจจุบัน</span>
+          <div class="status-label" id="statusLabel">รอข้อมูล</div>
+          <div class="status-conf" id="statusConf">ยังไม่เริ่มตรวจจับ</div>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div>
+        <span class="eyebrow" style="font-family:var(--font-mono);font-size:10.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--text-dim);display:block;margin-bottom:10px;">แนวโน้มล่าสุด</span>
+        <div class="history" id="history"></div>
+      </div>
+
+      <div class="btnrow">
+        <button id="startBtn">เริ่มกล้อง</button>
+        <button id="stopBtn" class="stop" disabled>หยุด</button>
+      </div>
+
+      <div class="foot-note">
+        โมเดลรันในเบราว์เซอร์ของคุณทั้งหมด ภาพจากกล้องไม่ถูกส่งออกไปที่ใดเลย
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+const CLASS_NAMES = ["ใบหน้าปกติ", "ใบหน้าเหนื่อย"];
+const IMG_SIZE = 224;
+const PREDICT_INTERVAL_MS = 700;
+const HISTORY_LEN = 24;
+
+const video = document.getElementById('video');
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const idleMsg = document.getElementById('idleMsg');
+const statusLabel = document.getElementById('statusLabel');
+const statusConf = document.getElementById('statusConf');
+const gaugeArc = document.getElementById('gaugeArc');
+const gaugeText = document.getElementById('gaugeText');
+const gaugeSvg = document.getElementById('gaugeSvg');
+const loadingRow = document.getElementById('loadingRow');
+const loadingText = document.getElementById('loadingText');
+const liveDot = document.getElementById('liveDot');
+const historyEl = document.getElementById('history');
+const clockEl = document.getElementById('clock');
+const corners = document.querySelectorAll('.corner');
+
+let model = null;
+let stream = null;
+let loopHandle = null;
+let history = [];
+
+const CIRC = 2 * Math.PI * 50;
+
+function tickClock(){
+  const now = new Date();
+  clockEl.textContent = now.toLocaleTimeString('th-TH', {hour12:false});
+}
+setInterval(tickClock, 1000);
+tickClock();
+
+function buildHistoryBars(){
+  historyEl.innerHTML = '';
+  for(let i=0;i<HISTORY_LEN;i++){
+    const bar = document.createElement('div');
+    bar.className = 'tick';
+    historyEl.appendChild(bar);
+  }
+}
+buildHistoryBars();
+
+function pushHistory(tiredProb){
+  history.push(tiredProb);
+  if(history.length > HISTORY_LEN) history.shift();
+  const bars = historyEl.children;
+  const offset = HISTORY_LEN - history.length;
+  for(let i=0;i<HISTORY_LEN;i++){
+    const bar = bars[i];
+    if(i < offset){
+      bar.style.height = '3px';
+      bar.style.background = 'var(--hairline)';
+    } else {
+      const v = history[i - offset];
+      bar.style.height = Math.max(3, v * 40) + 'px';
+      bar.style.background = v > 0.5 ? 'var(--danger)' : (v > 0.3 ? 'var(--warn)' : 'var(--alert)');
+    }
+  }
+}
+
+async function loadModel(){
+  loadingText.textContent = 'กำลังโหลดโมเดล…';
+  model = await tf.loadLayersModel('model/model.json');
+  // warm up
+  const warm = tf.zeros([1, IMG_SIZE, IMG_SIZE, 3]);
+  model.predict(warm).dispose();
+  warm.dispose();
+  loadingText.textContent = 'โมเดลพร้อมใช้งาน';
+  liveDot.classList.remove('live');
+  startBtn.disabled = false;
+}
+
+async function startCamera(){
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio:false });
+    video.srcObject = stream;
+    idleMsg.style.display = 'none';
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+    liveDot.classList.add('live');
+    loadingText.textContent = 'กำลังตรวจจับแบบ real-time';
+    loopHandle = setInterval(runPrediction, PREDICT_INTERVAL_MS);
+  }catch(err){
+    loadingText.textContent = 'เปิดกล้องไม่สำเร็จ: ' + err.message;
+  }
+}
+
+function stopCamera(){
+  if(loopHandle) clearInterval(loopHandle);
+  if(stream){
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+  }
+  video.srcObject = null;
+  idleMsg.style.display = 'flex';
+  idleMsg.style.alignItems = 'center';
+  idleMsg.style.justifyContent = 'center';
+  idleMsg.textContent = 'กดปุ่ม "เริ่มกล้อง" เพื่อเริ่มตรวจจับ';
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
+  liveDot.classList.remove('live');
+  loadingText.textContent = 'หยุดการตรวจจับแล้ว';
+  statusLabel.textContent = 'รอข้อมูล';
+  statusLabel.style.color = 'var(--text-dim)';
+  statusConf.textContent = 'ยังไม่เริ่มตรวจจับ';
+  gaugeArc.setAttribute('stroke-dashoffset', CIRC);
+  gaugeText.textContent = '--';
+  corners.forEach(c => c.style.borderColor = 'var(--alert)');
+}
+
+function setGauge(prob, colorVar){
+  const offset = CIRC * (1 - prob);
+  gaugeArc.setAttribute('stroke-dashoffset', offset);
+  gaugeArc.setAttribute('stroke', colorVar);
+  gaugeText.textContent = Math.round(prob*100) + '%';
+}
+
+async function runPrediction(){
+  if(!model || video.readyState < 2) return;
+
+  const tensor = tf.tidy(() => {
+    const img = tf.browser.fromPixels(video)
+      .resizeBilinear([IMG_SIZE, IMG_SIZE])
+      .toFloat();
+    // MobileNetV2 preprocess_input: scale to [-1, 1]
+    const scaled = img.div(127.5).sub(1);
+    return scaled.expandDims(0);
+  });
+
+  const predTensor = model.predict(tensor);
+  const pred = await predTensor.data();
+  tensor.dispose();
+  predTensor.dispose();
+
+  const tiredProb = pred[1];
+  const idx = pred[0] > pred[1] ? 0 : 1;
+  const conf = pred[idx] * 100;
+  const label = CLASS_NAMES[idx];
+
+  pushHistory(tiredProb);
+
+  if(idx === 1){
+    statusLabel.textContent = label;
+    statusLabel.style.color = tiredProb > 0.75 ? 'var(--danger)' : 'var(--warn)';
+    setGauge(tiredProb, tiredProb > 0.75 ? 'var(--danger)' : 'var(--warn)');
+    corners.forEach(c => c.style.borderColor = tiredProb > 0.75 ? 'var(--danger)' : 'var(--warn)');
+  } else {
+    statusLabel.textContent = label;
+    statusLabel.style.color = 'var(--alert)';
+    setGauge(tiredProb, 'var(--alert)');
+    corners.forEach(c => c.style.borderColor = 'var(--alert)');
+  }
+  statusConf.textContent = `ความมั่นใจ ${conf.toFixed(1)}%`;
+}
+
+startBtn.addEventListener('click', startCamera);
+stopBtn.addEventListener('click', stopCamera);
+startBtn.disabled = true;
+
+loadModel();
+</script>
+
+</body>
+</html>
